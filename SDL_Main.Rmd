@@ -1,0 +1,157 @@
+---
+title: "SDL_Main"
+author: "Delin Sun"
+date: "2023-08-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Aims
+
+This R Markdown document aims at completing analyses using the DS package
+
+## (Step 0) Packages & working drectory
+```{r, echo=FALSE}
+# Packages
+if (!require("pacman")) {
+  install.packages("pacman")
+} # make sure that pacman is installed
+
+pacman::p_load(tidyverse,    # data management
+               plyr,         # data manegement
+               data.table,   # quick read & write files
+               foreach,      # parallel processing
+               doParallel,   # parallel processing
+               lattice,      # plot network matrix
+               NBR,          # network-based statistics
+               ggseg,        # atlas-based brain maps, cortical / subcortical (e.g. aseg)
+               ggsegSchaefer # Schaefer's atlas, e.g. schaefer17_400
+)
+
+# Working directory
+setwd("C:/Users/sunde/Documents/Projects/Alex/Scripts")
+```
+
+## (Step 1) FC matrix of interest (e.g. DMN, SN, and FPN)
+## 1. select the time series of interest; 2. get the FC matrix
+```{r,echo=FALSE}
+# Input & output directory
+fdir_i <- file.path('..', 'Data','ts')
+fdir_o <- file.path('..', 'Results','FC','FC_Matrix_TriNetwork')
+
+# list all timeseries files
+fins <- fdir_i %>% list.files(pattern = 'corrMatrix_atlas-schaefer2011Combined_timeseries.tsv',
+                        full.names = TRUE,
+                        recursive = TRUE) # file fullname
+
+# Brain atlas
+fatlas <- '../Data/Brain_Atlas_Schaefer400_FreeSurfer17.csv'
+# Yeo's labels
+df_atlas <- fread(fatlas) %>% select('ROI_Yeo')
+# index of the areas of interest (Default=DMN, SalVentAttn=SN, Cont=CEN)
+idx <- grepl('Default|SalVentAttn|Cont', df_atlas$ROI_Yeo)
+
+
+t1 <- Sys.time() # start time
+# setup parallel backend to use many processors
+cores <- detectCores()
+cl <- makeCluster(cores[1]-1) #not to overload your computer
+registerDoParallel(cl)
+
+# Run parallel processing
+foreach(i = 1:length(fins), .packages=c('data.table')) %dopar% {
+  source("./DS/DS_net_FC.R")
+  DS_net_FC(fins[[i]], 0, 100, 3, idx, fdir_o) # SFC (win_len=0, win_overlap=100, TR=3)
+  DS_net_FC(fins[[i]], 30, 50, 3, idx, fdir_o) # DFC (win_len=30, win_overlap=50, TR=3)
+}
+#stop cluster
+stopCluster(cl)
+t2 <- Sys.time() # end time
+show(t2-t1)
+```
+
+## (Step 2) Plot the matrix of FC
+```{r,echo=FALSE}
+# input directory
+fdir_i <- file.path('..', 'Results','FC','FC_Matrix_TriNetwork')
+
+# list all files of interest
+fins <- fdir_i %>% list.files(pattern = 'corrMatrix_atlas-schaefer2011Combined_timeseries_FC_0_100',
+                        full.names = TRUE,
+                        recursive = TRUE) # file fullname
+
+# a matrix to contain all FC
+M <- array(NA, dim=c(sum(idx), sum(idx), length(fins)))
+for(i in 1:length(fins)[[1]]){
+  fin <- fins[[i]]
+  M[,,i] <- fread(fin) %>% as.matrix()
+}
+
+# matrix of averaged FC
+avg_M <- apply(M, 1:2, mean, na.rm=TRUE)
+# max-absolute value to set a color range centered in zero.
+flim <- max(abs(avg_M)[is.finite(avg_M)])
+# plot matrix
+levelplot(avg_M, main = "Average", xlab = "ROI", ylab = "ROI",
+          col.regions = colorRampPalette(c("blue","white", "red"))(100),
+          at = seq(-flim, flim, length.out = 100), 
+          scales=list(x=list(rot=90)))
+
+```
+
+
+## (Step 4) Demographic & clinical data (or behavioral data)
+```{r,echo=FALSE}
+# ?????? Where are the demographic and clinical information?
+head(behav)
+nrow(behav)
+identical(nrow(behav), dim(M)[3])
+```
+
+## (Step 5) Run statistical models
+```{r,echo=FALSE}
+set.seed(18900217) # set a seed number for permutation test
+
+# parallel calculation
+t1 <- Sys.time() # start time
+nbr_group <- nbr_lm(net = M, nnodes = sum(idx), idata = behav,
+   mod = "~ Group", thrP = 0.05, nperm = 100, cores = detectCores()[1]-1)
+t2 <- Sys.time() # end time
+show(t2-t1)
+length(nbr_group)
+```
+
+
+## FC matrix to vector
+```{r,echo=FALSE}
+# fdir_i <- '../Results/FC/FC_Matrix'
+# 
+# # list all files of interest
+# fins <- fdir_i %>% list.files(pattern = 'corrMatrix_atlas-schaefer2011Combined_timeseries_FC_0_100.csv',
+#                         full.names = TRUE,
+#                         recursive = TRUE) # file fullname
+# 
+# 
+# Vs <- NULL # initialize matrix of vectors
+#   fname <- NULL # initialize name of vectors
+# 
+# 
+# for(i in seq(50)){
+#   # .csv to matrix
+#   M <- fins[[i]] %>% fread() %>% as.matrix()
+#   # matrix to vector
+#   V <- M[lower.tri(M, diag = F)]
+#   # rbind vector
+#   Vs <- Vs %>% rbind(V)
+#   fname <- fname %>% rbind(fins[[i]])
+# }
+# # split (each chunk contains 1000 columns)
+# list_Vs <- Vs %>% split((seq(ncol(Vs))-1)%/%1000)
+# 
+# 
+# # df %>% fwrite('Vectors.csv')
+
+```
