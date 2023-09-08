@@ -32,7 +32,7 @@ pacman::p_load(tidyverse,    # data management
 )
 
 # Working directory
-setwd("C:/Users/sunde/Documents/Projects/Alex/Scripts")
+# setwd("C:/Users/sunde/Documents/Projects/Alex/Scripts")
 ```
 
 ## (Step 1) FC matrix of interest (e.g. DMN, SN, and FPN)
@@ -155,3 +155,39 @@ length(nbr_group)
 # # df %>% fwrite('Vectors.csv')
 
 ```
+
+
+## Averaged time series
+```{r,echo=FALSE}
+# Input & output directory
+fdir_i <- file.path('..', 'Data','ts')
+fdir_o <- file.path('..', 'Results','ts','avg_Yeo17')
+
+# list all timeseries files
+fins <- fdir_i %>% list.files(pattern = 'corrMatrix_atlas-schaefer2011Combined_timeseries.tsv',
+                        full.names = TRUE,
+                        recursive = TRUE) # file fullname
+
+# 400 Shaefer regions
+froi <- c(1:400) 
+# net_Delin is the network labels of all brain regions (each network consists of one to several regions)
+fnet<- file.path('..','Data','Brain_Atlas_Schaefer400_FreeSurfer17.csv') %>% fread() %>% select(Net_Delin) %>% .[[1]] 
+
+## parallel processing
+t1 <- Sys.time() # start time
+# setup parallel backend to use many processors
+cores <- detectCores()
+cl <- makeCluster(cores[1]-1) #not to overload your computer
+registerDoParallel(cl)
+
+# run parallel processing
+foreach(i = 1:length(fins)) %dopar% {
+  source("./DS/DS_net_avg.R")
+  DS_net_avg(fins[[i]], fnet, froi, fdir_o) 
+}
+#stop cluster
+stopCluster(cl)
+t2 <- Sys.time() # end time
+show(t2-t1)
+```
+
